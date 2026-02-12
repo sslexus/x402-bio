@@ -1,8 +1,10 @@
 import { Hono } from "hono";
-import { serve } from "@hono/node-server";
 import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
+import { decodePaymentSignatureHeader } from "@x402/core/http";
+import { db } from "./db";
+import { conversations } from "./db/schema";
 
 const app = new Hono();
 
@@ -39,8 +41,62 @@ app.use(
   ),
 );
 
-// Flow 1 — POST /research (x402 protected)
-// TODO: implement
+// ---   POST /research (x402 protected) ---
+app.post("/research", async (c) => {
+  // get wallet address from the verified x402 payment payload
+  const paymentHeader =
+    c.req.header("payment-signature") || c.req.header("x-payment");
+  let walletAddr = "unknown";
+
+  if (paymentHeader) {
+    try {
+      const paymentPayload = decodePaymentSignatureHeader(paymentHeader);
+      const payload = paymentPayload.payload as Record<string, any>;
+      walletAddr =
+        payload.authorization?.from ||
+        payload.permit2Authorization?.from ||
+        "unknown";
+    } catch {
+      // If decoding fails, continue with "unknown"
+    }
+  }
+
+  // Forward request to BIOS API
+  const body = await c.req.json();
+
+  const biosResponse = await fetch(`${biosApiBaseUrl}/research`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${biosApiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!biosResponse.ok) {
+    const error = await biosResponse.text();
+    return c.json(
+      { error: "BIOS API error", details: error },
+      biosResponse.status as 500,
+    );
+  }
+
+  const biosData = (await biosResponse.json()) as {
+    conversationId: string;
+    [key: string]: unknown;
+  };
+
+  // Store conversation in DB
+  await db.insert(conversations).values({
+    conversationId: biosData.conversationId,
+    walletAddr,
+    state: "pending",
+  });
+
+  return c.json({
+    conversationId: biosData.conversationId,
+  });
+});
 
 // Flow 2 — GET /research/:conversationId (no x402)
 // TODO: implement
@@ -53,9 +109,11 @@ app.get("/", (c) => {
 });
 
 if (process.env.NODE_ENV !== "production") {
-  const port = Number(process.env.PORT) || 4021;
-  console.log(`Server listening at http://localhost:${port}`);
-  serve({ fetch: app.fetch, port });
+  import("@hono/node-server").then(({ serve }) => {
+    const port = Number(process.env.PORT) || 4021;
+    console.log(`Server listening at http://localhost:${port}`);
+    serve({ fetch: app.fetch, port });
+  });
 }
 
 export default app;
