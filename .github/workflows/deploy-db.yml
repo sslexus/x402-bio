@@ -1,0 +1,56 @@
+name: Deploy Production Database Schema
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-production-schema:
+    name: Deploy Production Database Schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Generate database migrations
+        run: pnpm db:generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Check for uncommitted migration files
+        run: |
+          echo "Checking for uncommitted changes in working tree..."
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "ERROR: Uncommitted changes detected after db:generate"
+            echo "This means the schema has changes that haven't been committed as migrations."
+            echo ""
+            echo "Changed files:"
+            git status --short
+            echo ""
+            echo "Please run 'pnpm db:generate' locally and commit the generated migration files."
+            exit 1
+          else
+            echo "✓ No uncommitted changes - all schema changes are properly migrated"
+          fi
+
+      - name: Apply database migrations (production)
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
