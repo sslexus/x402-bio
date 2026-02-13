@@ -13,7 +13,7 @@ const biosApiBaseUrl = process.env.BIOS_API_BASE_URL!;
 const biosApiKey = process.env.BIOS_API_KEY!;
 
 const facilitatorClient = new HTTPFacilitatorClient({
-  url: "https://x402.org/facilitator",
+  url: "https://www.x402.org/facilitator",
 });
 
 const server = new x402ResourceServer(facilitatorClient).register(
@@ -106,6 +106,10 @@ app.post("/research", async (c) => {
 
 app.get("/", (c) => {
   return c.json({ status: "ok", service: "bio-x402" });
+});
+
+app.get("/lol", (c) => {
+  return c.json({ status: "LOL-OK", service: "bio-x402" });
 });
 
 if (process.env.NODE_ENV !== "production") {
